@@ -1,0 +1,12 @@
+body{
+    font-family: sans-serif;
+}
+
+.gambar{
+    padding: 20px;
+    width: 20%;
+}
+
+.gambar img{
+    border-radius: 50%;
+}

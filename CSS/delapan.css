@@ -1,0 +1,45 @@
+body {
+    background-color: #f8f9fa;
+    margin: 40px;
+    font-family: Arial, sans-serif;
+    color: #333;
+}
+.container {
+    max-width: 800px;
+    background: white;
+    padding: 20px;
+    margin: 0 auto;
+    border-radius: 8px;
+}
+.button-group {
+    margin-bottom: 20px;
+}
+.button-group h2 {
+    margin-bottom: 10px;
+}
+.button {
+    display: inline-block;
+    padding: 10px 20px;
+    margin-right: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    text-decoration: none;
+    color: black;
+    background-color: #f0f0f0;
+    cursor: pointer;
+}
+.button.orange {
+    background-color: orange;
+    color: white;
+    border: none;
+}
+.button.yellow {
+    background-color: #ffffcc;
+    border: 1px solid #ccc;
+}
+.button.white {
+    background-color: white;
+}
+.button.gray {
+    background-color: #d3d3d3;
+}
