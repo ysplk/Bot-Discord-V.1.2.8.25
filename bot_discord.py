@@ -324,13 +324,14 @@ async def ask_gemini(ctx, *, question: str):
 # Path absolut ke ffmpeg.exe lu
 FFMPEG_PATH = r"Z:\ffmpeg\ffmpeg-2025-08-25-git-1b62f9d3ae-full_build\bin\ffmpeg.exe"
 
-# Opsi buat yt_dlp biar cuma ngambil audio, gak pake video
+# --- OPSI YTDL DI-UPDATE BUAT PAKE COOKIES ---
 YTDL_OPTIONS = {
     'format': 'bestaudio/best',
     'noplaylist': True,
     'default_search': 'auto',
     'quiet': True,
     'no_warnings': True,
+    'cookiefile': 'youtube.com_cookies.txt'  # <-- TAMBAHIN INI
 }
 
 # Opsi buat FFmpeg biar koneksi stabil
@@ -354,18 +355,57 @@ async def get_song_info(query):
         
     return {'url': data['url'], 'title': data['title']}
 
-# Fungsi buat mainin lagu selanjutnya di antrian
+# --- FUNGSI PLAY_NEXT YANG SUDAH DI-UPGRADE ---
 async def play_next(ctx):
     guild_id = ctx.guild.id
+    # Cek dulu apa voice client masih nyambung
+    if not ctx.voice_client or not ctx.voice_client.is_connected():
+        if guild_id in music_queues:
+            del music_queues[guild_id] # Bersihin antrian kalo bot udah disconnect
+        return
+
+    # Kalo lagi muter lagu, jangan diganggu
+    if ctx.voice_client.is_playing():
+        return
+
+    # Cek kalo antrian ada dan gak kosong
     if guild_id in music_queues and not music_queues[guild_id].empty():
         song = await music_queues[guild_id].get()
-        # Kasih tau lokasi ffmpeg.exe secara langsung di sini
-        source = discord.FFmpegPCMAudio(song['url'], executable=FFMPEG_PATH, **FFMPEG_OPTIONS)
         
-        ctx.voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
-        
-        embed = discord.Embed(title="🎶 Lagi Muterin", description=f"**{song['title']}**", color=discord.Color.purple())
-        await ctx.send(embed=embed)
+        # Bikin fungsi 'after' yang lebih pinter buat nangkep dan ngelaporin error
+        def after_playing(error):
+            if error:
+                print(f"Anjir, error pas muter lagu: {error}")
+                # Kirim pesan error ke channel Discord biar lu tau
+                coro = ctx.send(f"Waduh, ada error pas muter lagu, bray. Mungkin lagunya gak bisa diakses.\n`{error}`")
+            else:
+                print("Lagu selesai diputer.")
+            
+            # Panggil play_next lagi buat lagu selanjutnya
+            # Ini cara yang bener buat ngejalanin fungsi async dari dalem 'after'
+            fut = asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop)
+            try:
+                # Coba ambil result-nya biar kalo ada error di play_next ketangkep
+                fut.result(timeout=5)
+            except Exception as e:
+                print(f"Error pas ngejalanin play_next dari after_playing: {e}")
+
+        try:
+            source = discord.FFmpegPCMAudio(song['url'], executable=FFMPEG_PATH, **FFMPEG_OPTIONS)
+            ctx.voice_client.play(source, after=after_playing)
+            
+            embed = discord.Embed(title="🎶 Lagi Muterin", description=f"**{song['title']}**", color=discord.Color.purple())
+            await ctx.send(embed=embed)
+        except Exception as e:
+            await ctx.send(f"Gila, error pas mau mulai muter lagu: `{e}`")
+            # Coba mainin lagu selanjutnya kalo ada error pas mau mulai
+            await play_next(ctx)
+    else:
+        # Kalo antrian kosong, bot diem aja nunggu.
+        print("Antrian kosong, bot diem di channel.")
+        # Bot bakal otomatis disconnect kalo diem kelamaan (timeout bawaan Discord)
+        # Ini yang mungkin bikin keliatan 'keluar'
+
 
 # --- KUMPULAN PERINTAH MUSIK (COG) ---
 class MusicCog(commands.Cog):
@@ -424,7 +464,7 @@ class MusicCog(commands.Cog):
         try:
             song = await get_song_info(search_query)
             await music_queues[ctx.guild.id].put(song)
-            await ctx.send(f"**{song['title']}** udah masuk antrian!")
+            await ctx.send(f"✅ **{song['title']}** udah masuk antrian!")
 
             if not ctx.voice_client.is_playing() and not ctx.voice_client.is_paused():
                 await play_next(ctx)
