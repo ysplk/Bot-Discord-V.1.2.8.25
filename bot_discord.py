@@ -7,17 +7,41 @@ import asyncio
 import json
 from dotenv import load_dotenv
 
+# --- Tambahan buat Musik & Spotify ---
+import yt_dlp
+import functools
+import re
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
+
 # --- PERSIAPAN BOT ---
 load_dotenv()
 intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True
 intents.message_content = True
+intents.voice_states = True # <-- PENTING: Izin buat liat status voice
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # --- KONFIGURASI TOKEN & KUNCI API ---
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+SPOTIPY_CLIENT_ID = os.getenv("SPOTIPY_CLIENT_ID")
+SPOTIPY_CLIENT_SECRET = os.getenv("SPOTIPY_CLIENT_SECRET")
+
+# --- Inisialisasi Klien Spotify ---
+if SPOTIPY_CLIENT_ID and SPOTIPY_CLIENT_SECRET:
+    try:
+        auth_manager = SpotifyClientCredentials(client_id=SPOTIPY_CLIENT_ID, client_secret=SPOTIPY_CLIENT_SECRET)
+        sp = spotipy.Spotify(auth_manager=auth_manager)
+        print("Klien Spotify berhasil diinisialisasi.")
+    except Exception as e:
+        sp = None
+        print(f"Gagal inisialisasi klien Spotify: {e}")
+else:
+    sp = None
+    print("Peringatan: Kredensial Spotify tidak ditemukan di .env. Fitur Spotify tidak akan aktif.")
+
 
 # --- NAMA FILE UNTUK MENYIMPAN SKOR ---
 SCORE_FILE = "scores.json"
@@ -27,7 +51,7 @@ FAIL_GIFS = [
     "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExbW0wcmJkc2JqaHJ2eTRiazVkejRiZXJ3NjlmdmVheW1tanI0dWFlaCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/mEnY8A6zE53pxLRD9a/giphy.gif"
 ]
 WIN_GIFS = [
-    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExYjh3OTE3MWtvd2ZmN2I4a3VhZWF2MXVkaTdoemE0MnVvcDRpc2t0MiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Ju7l5y9osyymQ/giphy.gif"
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExYjh3OTE3MWtvd2ZmN2I4a3VhZWF2MXVkaTdoemE0MnVvcDRpc2t0MiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Ju7l5y99osyymQ/giphy.gif"
 ]
 FIGHT_GIFS = [
     "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExb2szYnRrdXZ4ZHFoaG03YnJjeXZoa3M2cTFhc3pmMW5lNXN4ODJsMCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/NBAOL4ZPU4Pks/giphy.gif"
@@ -62,7 +86,7 @@ async def on_ready():
     print(f"Bot telah masuk sebagai {bot.user}")
     print("Bot siap menerima perintah!")
 
-# --- FUNGSI & KELAS UNTUK GAME ---
+# --- FUNGSI & KELAS UNTUK GAME (KODE LAMA LU, AMAN) ---
 
 async def generate_and_start_quiz(interaction: discord.Interaction, language: str):
     author_id = interaction.user.id
@@ -204,7 +228,7 @@ async def ask_quiz_question(channel, user):
     try:
         msg = await bot.wait_for('message', timeout=30.0, check=check)
         if msg.content.lower().strip() == question_data["a"].lower().strip():
-            await channel.send("Jawaban lu bener! �")
+            await channel.send("Jawaban lu bener! 👍")
             state["score"] += 1
         else:
             await channel.send(f"Salah, bray! Jawaban yang bener itu: **{question_data['a']}**")
@@ -251,7 +275,6 @@ async def leaderboard(ctx):
 
     await ctx.send(embed=embed)
 
-
 @bot.command()
 async def serverinfo(ctx):
     guild = ctx.guild
@@ -296,8 +319,249 @@ async def ask_gemini(ctx, *, question: str):
     except Exception as e:
         await thinking_message.edit(content=f"Anjir, error bray! Gagal nyambung ke otaknya AI. Coba lagi ntar.\nDetail: `{e}`")
 
-# --- MENJALANKAN BOT ---
-if DISCORD_TOKEN:
-    bot.run(DISCORD_TOKEN)
-else:
-    print("Error: Token Discord tidak ditemukan di file .env. Bot tidak bisa dijalankan.")
+# --- MODUL MUSIK ---
+
+# Path absolut ke ffmpeg.exe lu
+FFMPEG_PATH = r"Z:\ffmpeg\ffmpeg-2025-08-25-git-1b62f9d3ae-full_build\bin\ffmpeg.exe"
+
+# Opsi buat yt_dlp biar cuma ngambil audio, gak pake video
+YTDL_OPTIONS = {
+    'format': 'bestaudio/best',
+    'noplaylist': True,
+    'default_search': 'auto',
+    'quiet': True,
+    'no_warnings': True,
+}
+
+# Opsi buat FFmpeg biar koneksi stabil
+FFMPEG_OPTIONS = {
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'options': '-vn',
+}
+
+# Tempat nyimpen antrian lagu buat tiap server
+music_queues = {}
+
+# Fungsi buat ngambil info lagu pake yt-dlp (dijalanin di thread terpisah biar bot gak nge-freeze)
+async def get_song_info(query):
+    loop = asyncio.get_event_loop()
+    partial_func = functools.partial(yt_dlp.YoutubeDL(YTDL_OPTIONS).extract_info, query, download=False)
+    data = await loop.run_in_executor(None, partial_func)
+    
+    if 'entries' in data:
+        # Kalo hasil search, ambil yang pertama
+        data = data['entries'][0]
+        
+    return {'url': data['url'], 'title': data['title']}
+
+# Fungsi buat mainin lagu selanjutnya di antrian
+async def play_next(ctx):
+    guild_id = ctx.guild.id
+    if guild_id in music_queues and not music_queues[guild_id].empty():
+        song = await music_queues[guild_id].get()
+        # Kasih tau lokasi ffmpeg.exe secara langsung di sini
+        source = discord.FFmpegPCMAudio(song['url'], executable=FFMPEG_PATH, **FFMPEG_OPTIONS)
+        
+        ctx.voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
+        
+        embed = discord.Embed(title="🎶 Lagi Muterin", description=f"**{song['title']}**", color=discord.Color.purple())
+        await ctx.send(embed=embed)
+
+# --- KUMPULAN PERINTAH MUSIK (COG) ---
+class MusicCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    @commands.command(name="join", help="Nongol di voice channel lu")
+    async def join(self, ctx):
+        if not ctx.author.voice:
+            await ctx.send("Lu aja belom masuk voice channel, bray!")
+            return
+        
+        channel = ctx.author.voice.channel
+        if ctx.voice_client is not None:
+            await ctx.voice_client.move_to(channel)
+        else:
+            await channel.connect()
+        await ctx.send(f"Udah join ke **{channel.name}**!")
+
+    @commands.command(name="play", help="Muterin lagu dari YouTube atau Spotify (link atau judul)")
+    async def play(self, ctx, *, query: str):
+        if not ctx.author.voice:
+            await ctx.send("Masuk voice channel dulu, baru nyetel lagu!")
+            return
+
+        channel = ctx.author.voice.channel
+        if ctx.voice_client is None:
+            await channel.connect()
+        elif ctx.voice_client.channel != channel:
+            await ctx.voice_client.move_to(channel)
+
+        if ctx.guild.id not in music_queues:
+            music_queues[ctx.guild.id] = asyncio.Queue()
+
+        # --- LOGIKA BARU BUAT SPOTIFY ---
+        search_query = query
+        spotify_track_regex = r"(https?://)?(www\.)?open\.spotify\.com/track/([a-zA-Z0-9]+)"
+        match = re.match(spotify_track_regex, query)
+
+        if match and sp:
+            try:
+                track_id = match.group(3)
+                track = sp.track(track_id)
+                track_name = track['name']
+                artist_name = track['artists'][0]['name']
+                search_query = f"{track_name} {artist_name}"
+                await ctx.send(f"🔍 Nemu lagu Spotify: **{track_name} - {artist_name}**. Nyari di YouTube...")
+            except Exception as e:
+                await ctx.send(f"Waduh, gagal ngambil info dari link Spotify itu. Error: `{e}`")
+                return
+        elif match and not sp:
+            await ctx.send("Fitur Spotify belom aktif, bray. Cek lagi `SPOTIPY_CLIENT_ID` dan `SPOTIPY_CLIENT_SECRET` di file .env lu.")
+            return
+        # --- AKHIR LOGIKA SPOTIFY ---
+
+        try:
+            song = await get_song_info(search_query)
+            await music_queues[ctx.guild.id].put(song)
+            await ctx.send(f"**{song['title']}** udah masuk antrian!")
+
+            if not ctx.voice_client.is_playing() and not ctx.voice_client.is_paused():
+                await play_next(ctx)
+
+        except Exception as e:
+            await ctx.send(f"Waduh, error pas nyari lagu: `{str(e)}`")
+
+
+    @commands.command(name="skip", help="Ngelewatin lagu yang lagi diputer")
+    async def skip(self, ctx):
+        if ctx.voice_client and ctx.voice_client.is_playing():
+            ctx.voice_client.stop()
+            await ctx.send("Lagu di-skip!")
+        else:
+            await ctx.send("Lagi gak ada lagu yang diputer, bray.")
+            
+    @commands.command(name="pause", help="Jeda lagu yang lagi diputer")
+    async def pause(self, ctx):
+        if ctx.voice_client and ctx.voice_client.is_playing():
+            ctx.voice_client.pause()
+            await ctx.send("Lagu di-pause. Pake `!resume` buat lanjutin.")
+        else:
+            await ctx.send("Gak ada lagu yang lagi muter buat di-pause.")
+
+    @commands.command(name="resume", help="Lanjutin lagi lagu yang di-pause")
+    async def resume(self, ctx):
+        if ctx.voice_client and ctx.voice_client.is_paused():
+            ctx.voice_client.resume()
+            await ctx.send("Lagu dilanjutin!")
+        else:
+            await ctx.send("Gak ada lagu yang lagi di-pause.")
+
+    @commands.command(name="stop", help="Berhentiin musik dan keluar dari voice channel")
+    async def stop(self, ctx):
+        if ctx.voice_client:
+            if ctx.guild.id in music_queues:
+                while not music_queues[ctx.guild.id].empty():
+                    await music_queues[ctx.guild.id].get()
+            
+            await ctx.voice_client.disconnect()
+            await ctx.send("Oke, gua cabut. Makasih udah dengerin!")
+        else:
+            await ctx.send("Gua aja kaga di voice channel.")
+
+    @commands.command(name="queue", help="Nampilin daftar antrian lagu")
+    async def queue(self, ctx):
+        guild_id = ctx.guild.id
+        if guild_id not in music_queues or music_queues[guild_id].empty():
+            await ctx.send("Antrian lagu kosong, bray!")
+            return
+
+        embed = discord.Embed(title="📜 Antrian Lagu", color=discord.Color.blue())
+        queue_list = list(music_queues[guild_id]._queue)
+
+        for i, song in enumerate(queue_list):
+            embed.add_field(name=f"#{i+1}. {song['title']}", value=" ", inline=False)
+        
+        await ctx.send(embed=embed)
+
+# --- MODUL MODERASI (BARU!) ---
+class ModerationCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    @commands.command(name="kick", help="Nendang anggota dari server.")
+    @commands.has_permissions(kick_members=True)
+    async def kick(self, ctx, member: discord.Member, *, reason: str = "Gak ada alesan, iseng aja."):
+        if member == ctx.author:
+            await ctx.send("Lu gabisa nendang diri sendiri, bray.")
+            return
+        if member == self.bot.user:
+            await ctx.send("Gak bisa nendang gua dong!")
+            return
+            
+        await member.kick(reason=reason)
+        embed = discord.Embed(title="👢 Anggota Ditendang", color=discord.Color.orange())
+        embed.add_field(name="Anggota", value=member.mention, inline=False)
+        embed.add_field(name="Alesan", value=reason, inline=False)
+        embed.set_footer(text=f"Ditendang oleh: {ctx.author.name}")
+        await ctx.send(embed=embed)
+
+    @commands.command(name="ban", help="Nge-ban anggota dari server.")
+    @commands.has_permissions(ban_members=True)
+    async def ban(self, ctx, member: discord.Member, *, reason: str = "Gak ada alesan spesifik."):
+        if member == ctx.author:
+            await ctx.send("Lu gabisa nge-ban diri sendiri, bray.")
+            return
+        if member == self.bot.user:
+            await ctx.send("Gak bisa nge-ban gua dong!")
+            return
+
+        await member.ban(reason=reason)
+        embed = discord.Embed(title="🚫 Anggota Di-Ban", color=discord.Color.red())
+        embed.add_field(name="Anggota", value=member.mention, inline=False)
+        embed.add_field(name="Alesan", value=reason, inline=False)
+        embed.set_footer(text=f"Di-ban oleh: {ctx.author.name}")
+        await ctx.send(embed=embed)
+
+    @commands.command(name="move", help="Mindahin anggota ke voice channel lain.")
+    @commands.has_permissions(move_members=True)
+    async def move(self, ctx, member: discord.Member, channel: discord.VoiceChannel):
+        if not member.voice:
+            await ctx.send(f"{member.mention} lagi gak ada di voice channel.")
+            return
+        
+        await member.move_to(channel)
+        await ctx.send(f"Berhasil mindahin {member.mention} ke **{channel.name}**!")
+
+    # Error handling buat yang gak punya izin
+    @kick.error
+    @ban.error
+    @move.error
+    async def moderation_error(self, ctx, error):
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.send("Lu kaga punya izin buat pake perintah ini, bray!")
+        elif isinstance(error, commands.MemberNotFound):
+            await ctx.send("Gak nemu anggota itu di server ini.")
+        elif isinstance(error, commands.ChannelNotFound):
+             await ctx.send("Gak nemu voice channel itu.")
+        else:
+            await ctx.send(f"Anjir, ada error: `{error}`")
+
+
+# --- MENJALANKAN BOT DENGAN CARA MODERN ---
+async def main():
+    if not DISCORD_TOKEN:
+        print("Error: Token Discord tidak ditemukan di file .env. Bot tidak bisa dijalankan.")
+        return
+        
+    async with bot:
+        await bot.add_cog(MusicCog(bot))      # 'Nempel'in modul musik ke bot
+        await bot.add_cog(ModerationCog(bot)) # 'Nempel'in modul hansip ke bot
+        await bot.start(DISCORD_TOKEN)
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Bot dimatiin.")
+
