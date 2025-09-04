@@ -321,9 +321,6 @@ async def ask_gemini(ctx, *, question: str):
 
 # --- MODUL MUSIK ---
 
-# Path absolut ke ffmpeg.exe lu
-FFMPEG_PATH = r"Z:\ffmpeg\ffmpeg-2025-08-25-git-1b62f9d3ae-full_build\bin\ffmpeg.exe"
-
 # --- OPSI YTDL DI-UPDATE BUAT PAKE COOKIES ---
 YTDL_OPTIONS = {
     'format': 'bestaudio/best',
@@ -331,7 +328,7 @@ YTDL_OPTIONS = {
     'default_search': 'auto',
     'quiet': True,
     'no_warnings': True,
-    'cookiefile': 'youtube.com_cookies.txt'  # <-- TAMBAHIN INI
+    'cookiefile': 'youtube.com_cookies.txt'
 }
 
 # Opsi buat FFmpeg biar koneksi stabil
@@ -391,7 +388,8 @@ async def play_next(ctx):
                 print(f"Error pas ngejalanin play_next dari after_playing: {e}")
 
         try:
-            source = discord.FFmpegPCMAudio(song['url'], executable=FFMPEG_PATH, **FFMPEG_OPTIONS)
+            # HAPUS path absolut, biar Railway bisa nemu FFmpeg-nya sendiri
+            source = discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTIONS)
             ctx.voice_client.play(source, after=after_playing)
             
             embed = discord.Embed(title="🎶 Lagi Muterin", description=f"**{song['title']}**", color=discord.Color.purple())
@@ -604,4 +602,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("Bot dimatiin.")
-
