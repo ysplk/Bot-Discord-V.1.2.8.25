@@ -369,55 +369,44 @@ async def get_song_info(query):
 # --- FUNGSI PLAY_NEXT YANG SUDAH DI-UPGRADE ---
 async def play_next(ctx):
     guild_id = ctx.guild.id
-    # Cek dulu apa voice client masih nyambung
     if not ctx.voice_client or not ctx.voice_client.is_connected():
         if guild_id in music_queues:
-            del music_queues[guild_id] # Bersihin antrian kalo bot udah disconnect
+            del music_queues[guild_id] 
         return
 
-    # Kalo lagi muter lagu, jangan diganggu
     if ctx.voice_client.is_playing():
         return
 
-    # Cek kalo antrian ada dan gak kosong
     if guild_id in music_queues and not music_queues[guild_id].empty():
         song = await music_queues[guild_id].get()
         
-        # Bikin fungsi 'after' yang lebih pinter buat nangkep dan ngelaporin error
         def after_playing(error):
             if error:
                 print(f"Anjir, error pas muter lagu: {error}")
-                # Kirim pesan error ke channel Discord biar lu tau
                 coro = ctx.send(f"Waduh, ada error pas muter lagu, bray. Mungkin lagunya gak bisa diakses.\n`{error}`")
             else:
                 print("Lagu selesai diputer.")
             
-            # Panggil play_next lagi buat lagu selanjutnya
-            # Ini cara yang bener buat ngejalanin fungsi async dari dalem 'after'
             fut = asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop)
             try:
-                # Coba ambil result-nya biar kalo ada error di play_next ketangkep
                 fut.result(timeout=5)
             except Exception as e:
                 print(f"Error pas ngejalanin play_next dari after_playing: {e}")
 
         try:
-            # HAPUS path absolut, biar Railway bisa nemu FFmpeg-nya sendiri
             source = discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTIONS)
             ctx.voice_client.play(source, after=after_playing)
             
             embed = discord.Embed(title="🎶 Lagi Muterin", description=f"**{song['title']}**", color=discord.Color.purple())
             await ctx.send(embed=embed)
         except Exception as e:
-            await ctx.send(f"Gila, error pas mau mulai muter lagu: `{e}`")
-            # Coba mainin lagu selanjutnya kalo ada error pas mau mulai
+            # --- BAGIAN INI DI-UPDATE BIAR LEBIH JELAS ---
+            error_message = f"Gila, error pas mau mulai muter lagu: `{e}`"
+            print(error_message) # Cetak error ke konsol Railway biar bisa diliat
+            await ctx.send(error_message) # Kirim errornya ke chat juga
             await play_next(ctx)
     else:
-        # Kalo antrian kosong, bot diem aja nunggu.
         print("Antrian kosong, bot diem di channel.")
-        # Bot bakal otomatis disconnect kalo diem kelamaan (timeout bawaan Discord)
-        # Ini yang mungkin bikin keliatan 'keluar'
-
 
 # --- KUMPULAN PERINTAH MUSIK (COG) ---
 class MusicCog(commands.Cog):
