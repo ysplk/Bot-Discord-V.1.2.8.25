@@ -1,5 +1,6 @@
+
 [phases.setup]
-nixPkgs = ["...", "ffmpeg"]
+nixPkgs = ["...", "ffmpeg", "opus-with-tools"]
 
 [start]
 cmd = "python bot_discord.py"
