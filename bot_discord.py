@@ -335,14 +335,14 @@ async def ask_gemini(ctx, *, question: str):
 
 # --- MODUL MUSIK ---
 
-# --- OPSI YTDL DI-UPDATE BUAT PAKE COOKIES ---
+# --- OPSI YTDL DI-UPDATE BIAR LEBIH RINGAN ---
 YTDL_OPTIONS = {
-    'format': 'bestaudio/best',
+    'format': 'worstaudio/best', # <-- GANTI JADI INI
     'noplaylist': True,
     'default_search': 'auto',
     'quiet': True,
     'no_warnings': True,
-    'cookiefile': COOKIE_FILENAME # Pake nama file dari variabel di atas
+    'cookiefile': COOKIE_FILENAME 
 }
 
 # Opsi buat FFmpeg biar koneksi stabil
@@ -361,7 +361,6 @@ async def get_song_info(query):
     data = await loop.run_in_executor(None, partial_func)
     
     if 'entries' in data:
-        # Kalo hasil search, ambil yang pertama
         data = data['entries'][0]
         
     return {'url': data['url'], 'title': data['title']}
@@ -400,10 +399,9 @@ async def play_next(ctx):
             embed = discord.Embed(title="🎶 Lagi Muterin", description=f"**{song['title']}**", color=discord.Color.purple())
             await ctx.send(embed=embed)
         except Exception as e:
-            # --- BAGIAN INI DI-UPDATE BIAR LEBIH JELAS ---
             error_message = f"Gila, error pas mau mulai muter lagu: `{e}`"
-            print(error_message) # Cetak error ke konsol Railway biar bisa diliat
-            await ctx.send(error_message) # Kirim errornya ke chat juga
+            print(error_message) 
+            await ctx.send(error_message) 
             await play_next(ctx)
     else:
         print("Antrian kosong, bot diem di channel.")
