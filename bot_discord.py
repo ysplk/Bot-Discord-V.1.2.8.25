@@ -42,6 +42,20 @@ else:
     sp = None
     print("Peringatan: Kredensial Spotify tidak ditemukan di .env. Fitur Spotify tidak akan aktif.")
 
+# --- JURUS PAMUNGKAS BUAT COOKIES YOUTUBE ---
+YT_COOKIES_CONTENT = os.getenv("YT_COOKIES")
+COOKIE_FILENAME = "youtube.com_cookies.txt"
+
+if YT_COOKIES_CONTENT:
+    try:
+        # Tulis isi dari environment variable ke dalem file
+        with open(COOKIE_FILENAME, 'w') as f:
+            f.write(YT_COOKIES_CONTENT)
+        print("File cookies YouTube berhasil dibuat dari environment variable.")
+    except Exception as e:
+        print(f"Gagal nulis file cookies dari env var: {e}")
+# --- AKHIR JURUS PAMUNGKAS ---
+
 
 # --- NAMA FILE UNTUK MENYIMPAN SKOR ---
 SCORE_FILE = "scores.json"
@@ -328,7 +342,7 @@ YTDL_OPTIONS = {
     'default_search': 'auto',
     'quiet': True,
     'no_warnings': True,
-    'cookiefile': 'youtube.com_cookies.txt'
+    'cookiefile': COOKIE_FILENAME # Pake nama file dari variabel di atas
 }
 
 # Opsi buat FFmpeg biar koneksi stabil
